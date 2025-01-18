@@ -1,0 +1,116 @@
+services:
+  backend:
+    container_name: spin
+    build: .
+    env_file: .env
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_HOST
+      - POSTGRES_DBNAME
+      - SALT_ROUNDS
+      - JWT_KEY
+      - CERBROS_URL
+      - AZURE_CLIENTID
+      - AZURE_CLIENTSECRET
+      - AZURE_TENANTID
+      - AZURE_USERNAME
+      - AZURE_PASSWORD
+      - AZURE_ONELAKEURL
+      - PORT
+      - BACKEND_URL
+    links:
+      - db
+    depends_on:
+      db:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - db_network
+    ports:
+      - "3000:3000"
+  migration:
+    image: migrate/migrate
+    networks:
+      - db_network
+    volumes:
+      - ./migrations:/migrations
+    env_file: .env
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DBNAME
+    command:
+      [
+        "-path",
+        "/migrations",
+        "-database",
+        "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DBNAME?sslmode=disable",
+        "up",
+      ]
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    container_name: postgres
+    image: postgres
+    env_file: .env
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /data/postgres
+      POSTGRES_DB: spin
+    volumes:
+      - db_volume:/data/postgres
+    networks:
+      - db_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  cerbos:
+    container_name: cerbros
+    image: ghcr.io/cerbos/cerbos:0.40.0
+    ports:
+      - "3592:3592"
+    volumes:
+      - ./policies:/policies
+    networks:
+      - db_network
+    depends_on:
+      db:
+        condition: service_healthy
+  py_be:
+    container_name: py_be
+    image: suryaaprakassh/ms_py_spin
+    ports:
+      - "5001:5000"
+    networks:
+      - db_network
+    environment:
+      - AZURE_ENDPOINT
+      - AZURE_OPENAI_API_KEY
+      - AZURE_OPENAI_API_VERSION
+      - AZURE_DEPLOYMENT
+      - VECTOR_STORE_ADDRESS
+      - VECTOR_STORE_PASSWORD
+      - LLAMA_ENDPOINT
+      - LLAMA_API_KEY
+      - LLAMA_DEPLOYMENT
+      - LANGCHAIN_API_KEY
+      - LANGCHAIN_TRACING_V2
+      - LANGCHAIN_ENDPOINT
+      - LANGCHAIN_PROJECT
+    depends_on:
+      db:
+        condition: service_healthy
+networks:
+  db_network:
+    driver: bridge
+volumes:
+  db_volume:
